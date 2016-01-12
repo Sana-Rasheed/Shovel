@@ -145,9 +145,9 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 		                     'var': 'SCHL'},
 	"""
 
-	def create_level(var, index, values, num_joined, no_matches=False):
-		if no_matches:
-			num_people = no_matches  # I'm saying no_match is now a list of integers to replace with
+	def create_level(var, index, values, num_joined, replace_num_people_with=False):
+		if replace_num_people_with:
+			num_people = replace_num_people_with 
 		else:
 			if index is not None:
 				num_people = [predictions[index] for var, predictions in prediction_map]
@@ -181,20 +181,25 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 
 			lower_bound, upper_bound = path[var]
 
+			# iterate through index pairs backwards by enumeration so we can pop safely
+			# if a pair of values for dynamic variable is inconsistent, then remove just that pair
+			# if all the pairs are inconsistent, then whole group is inconsistent
+			# however if a static variable is inconsistent, then whole group is inconsistent.
+
 			if type(values) is list:
-				for i in reversed(list(range(len(values)))):  # iterate through index pairs backwards by enumeration so we can pop safely
+				for i in reversed(list(range(len(values)))):
 					min_var, max_var = values[i]
 
 					if not (lower_bound >= min_var and upper_bound <= max_var): 
-						values.pop()  # if a pair of values for dynamic variable is inconsistent, then remove that pair from consideration
+						values.pop() 
 
 				if not values:
-					return False  # if every pair of values for the dynamic variable is inconsistent then whole set is inconsistent
+					return False 
 			else:
 				min_var, max_var = values
 
 				if not (lower_bound >= min_var and upper_bound <= max_var): 
-					return False  # if there is a static check and it fails then the whole set is inconsistent
+					return False
 
 		return True
 
@@ -205,6 +210,7 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 		return [[(var, list(parsed_expressions[var].items())) for var in group] for group in model]
 
 	def new_traverse(cur_list, path, expression_items, parent_people):
+		# Conjoined variables are not considered in current version
 		if not expression_items:
 			return
 
@@ -217,9 +223,9 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 		for expression in expression_pack:
 			var_to_add, values = expression
 
-			num_joined = 0 # TODO SETTing num_joined to 0 always for now
+			num_joined = 0
 
-			if type(values) is list:  # if it is a dynamic variable. Always succeeds at this check first so head will have the index, static wont
+			if type(values) is list: 
 				cur_list += [create_level(var_to_add, index, value, num_joined) for index, value in values]
 			else:
 				cur_list.append((create_level(var_to_add, None, values, None)))
@@ -240,7 +246,7 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 			for prediction, coefficients in enumerate(subtract_people):  # [[cat1, cat2,..], prediction2, ...]
 				new_entry["num_people"][prediction] -= coefficients[category]
 
-		cur_list.append((create_level("no_matches", None, None, num_joined, no_matches=underflow)))	
+		cur_list.append((create_level("no_matches", None, None, num_joined, replace_num_people_with=underflow)))	
 
 		for new_entry in cur_list:
 			new_path = update_path(path, new_entry)	
@@ -267,7 +273,7 @@ def generate_assignments(model, initial_people, features=None):
 
 	def mk_int(s):
 	    s = s.strip()
-	    return int(s) if s else None  #TODO: Think about 0 vs None - do we cast NA to zero in some cases?
+	    return int(s) if s else None  #TODO: Accepting NA/0 for value.
 
 	def is_match(middle, lower_bound, upper_bound):
 		if middle is not None and middle >= lower_bound and middle <= upper_bound:
@@ -293,7 +299,8 @@ def generate_assignments(model, initial_people, features=None):
 			return list()
 
 		if cur_level[0]["next"][0]["var"] == var:
-			return [sub_entry for new_entry in cur_level for sub_entry in new_entry["next"] if sub_entry["values"] == values]
+			return [sub_entry for new_entry in cur_level 
+							  for sub_entry in new_entry["next"] if sub_entry["values"] == values]
 
 		return get_different_paths(cur_level[0]["next"], var, values)
 
@@ -309,11 +316,11 @@ def generate_assignments(model, initial_people, features=None):
 			indices: indices of matching proportions
 		"""
 
-		for var_data in sub_hierarchy:  #TODO: because ignoring last index here, when using static vars still need to add no_match or account for
-			if not var_data["values"] and not var_data["next"]:  # values == None means it is a no_matches. not var_data["next"] means end of file.
+		for var_data in sub_hierarchy:  
+			if not var_data["values"] and not var_data["next"]: 
 				row_prediction = trim_hierarchy(row, var_data)
-				if row_prediction: # if this one works then does current level first. otherwise searches all parents branches. 
-					return row_prediction	# we can skip because it will try it again and fail in loop.
+				if row_prediction:  
+					return row_prediction
 
 				row_prediction = next(var_data["dump_iter"])
 				if config.debug_dumped_predictions:
@@ -324,13 +331,13 @@ def generate_assignments(model, initial_people, features=None):
 			row_val = mk_int(row[col_names[var_data["var"]]])
 			lower_bound, upper_bound = var_data["values"]
 
-			if not is_match(row_val, lower_bound, upper_bound):	 # skip non-matches
+			if not is_match(row_val, lower_bound, upper_bound):
 				continue
 
-			if not var_data["next"]:  # we have hit the bottom so do assignment (on just the consistent ones that have matching values to row)
+			if not var_data["next"]: 
 				row_prediction = trim_hierarchy(row, var_data)
-				if row_prediction: # if this one works then does current level first. otherwise searches all parents branches. 
-					return row_prediction	# we can skip because it will try it again and fail in loop.
+				if row_prediction:
+					return row_prediction
 
 				for entry in get_different_paths(hierarchy, var_data["var"], var_data["values"]):
 					row_prediction = trim_hierarchy(row, entry)
@@ -352,7 +359,7 @@ def generate_assignments(model, initial_people, features=None):
 
 	expressions = parse_model_statements()
 	hierarchy = create_hierarchy(expressions, model, initial_people)
-	prediction_names = list(create_prediction_map().keys()) # used inside trim_hierarchy inside predict_rows
+	prediction_names = list(create_prediction_map().keys()) # used inside trim_hierarchy, inside predict_rows
 
 	with open(config.base_file) as acs_csv, \
 		 open(config.output_file, "w", newline = "") as w_csv:
@@ -364,7 +371,7 @@ def generate_assignments(model, initial_people, features=None):
 		col_names = {r[0][i] : i for i in range(len(r[0][:-80]))}
 		output.writerow(["COUNTY_NAME"] + features)
 
-		for row in r[1:]:  # thid can be done better with a splice
+		for row in r[1:]: 
 			row_prediction = predict_row(row, hierarchy)
 			if not config.output_rows:
 				continue
