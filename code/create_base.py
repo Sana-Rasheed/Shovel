@@ -93,6 +93,9 @@ def parse_model_statements():
 	for multi_dict in var_dict["AND"]:
 		trim_multi_static(multi_dict)
 
+	if config.debug_model_parser:
+		pprint(var_dict)
+
 	return var_dict
 
 def create_prediction_map():
@@ -357,8 +360,7 @@ def generate_output(model, initial_people, features=None):
 
 	expressions = parse_model_statements()
 	hierarchy = create_hierarchy(expressions, model, initial_people)
-	prediction_names = list(create_prediction_map().keys())
-	dump_predictions = itertools.cycle(prediction_names)
+	prediction_names = list(create_prediction_map().keys()) # used inside trim_hierarchy inside predict_rows
 
 	with open(config.base_file) as acs_csv, \
 		 open(config.output_file, "w", newline = "") as w_csv:

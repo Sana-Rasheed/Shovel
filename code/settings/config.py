@@ -16,6 +16,9 @@ output_file = r".\data\results\pnh13.csv"
 '''Output to stderr the hierarchy after prediction'''
 debug_hierarchy = False
 
+'''Output to stderr how the models were parsed into groups'''
+debug_model_parser = False
+
 '''Store extra debugging information in hierachy on predictions that dont fit assignments.
 	Takes up a lot of space if working with big models, so set to False if needed there.'''
 debug_dumped_predictions = True
@@ -23,8 +26,8 @@ debug_dumped_predictions = True
 ###################
 # Script config
 ###################
-'''If true it will fill output file with new data.'''
-output_rows = True
+'''If true it will fill output file with new data. If false, create file with only headers.'''
+output_rows = False
 
 '''Whether shovel outputs the people one at a time or as a group.'''
 duplicate_rows = False
