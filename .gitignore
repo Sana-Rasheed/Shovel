@@ -1,13 +1,21 @@
 ## Old stuff
+shovel/old
 
-code/old
-code/data
-
-## Big files
-
+## Input files
 ss13pnh.csv
 
-## Personal
+## Output files
+pnh13.csv
 
+## Personal
 project_draft.Rmd
 project_notes.Rmd
+
+
+
+
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class

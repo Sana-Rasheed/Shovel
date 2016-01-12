@@ -8,7 +8,9 @@ import copy
 from random import shuffle, seed
 from pprint import pprint
 
-def create_var_dict():
+from .settings import config as config
+
+def parse_model_statements():
 	""" Reads the cleaned_sum_files.csv and returns nicer data structure for hierarchal variable breakdown
 
 	Operations are performed on the column names, or categories, that we defined earlier in clean_summaries()
@@ -64,7 +66,7 @@ def create_var_dict():
 
 	var_dict = {"AND": []}
 
-	with open("..\scripts\county_assignment\data\sum_13_files.csv") as sumcsv:  #TODO: make this general
+	with open(config.model_file) as sumcsv:
 		r = list(csv.reader(sumcsv))		
 		columns = {r[0][i] : i - 1 for i in range(1, len(r[0]))}
 
@@ -110,7 +112,7 @@ def create_prediction_map():
 	"""
 	prediction_map = collections.OrderedDict()
 	
-	with open("..\scripts\county_assignment\data\sum_13_files.csv") as sum_csv:
+	with open(config.model_file) as sum_csv:
  		sum_file = csv.reader(sum_csv)
 
  		for row in list(sum_file)[1:]:
@@ -119,7 +121,7 @@ def create_prediction_map():
 
 	return prediction_map	
 
-def create_hierarchy(var_dict, model):
+def create_hierarchy(var_dict, model, initial_people):
 	""" Transforms the data structure from summary files into a variable proportion hierarchy for application to each row
 
 	Starts with an empty list and recursively constructs the hierarchy
@@ -129,7 +131,7 @@ def create_hierarchy(var_dict, model):
 	Once in final format, can be applied to row easily by diving down hierarchy where row_from_pums_file[var] is in cur_hierarchy[values]
 
 	Args:
-		var_dict: Summary file variables after being prepped by create_var_dict()
+		ar_dict: Summary file variables after being prepped by create_ar_dict()
 
 	Returns:
 		Returns a list of dictionaries. 
@@ -202,24 +204,10 @@ def create_hierarchy(var_dict, model):
 		return True
 
 	def overflow_strategy(max_num_people, all_num_people):
-		return [int((num_people / sum(all_num_people)) * max_num_people) for num_people in all_num_people]  # make new dist of num_peoples match old.
+		return [int((num_people / sum(all_num_people)) * max_num_people) for num_people in all_num_people] 
 
 	def initialize_var_items(model):
-		var_items = []
-
-		# if var_dict["AND"]:
-		# 	for multi_dict in var_dict["AND"]:
-		# 		if multi_dict["static"]:
-		# 			dynamic_var = [v for v in multi_dict.keys() if v != "static"][0]
-		# 			multi_vars = [(static_var, values) for static_var, values in multi_dict["static"].items()]
-		# 			multi_vars += [(dynamic_var, list(multi_dict[dynamic_var].items()))]
-
-		# 			var_items.append(multi_vars)
-
-		var_items += [[(var, list(var_dict[var].items())) for var in group] 
-														for group in model]
-
-		return var_items
+		return [[(var, list(var_dict[var].items())) for var in group] for group in model]
 
 	def new_traverse(cur_list, path, var_items, parent_people):
 		if not var_items:
@@ -240,7 +228,7 @@ def create_hierarchy(var_dict, model):
 				cur_list += [create_level(var_to_add, index, value, num_joined) for index, value in values]
 			else:
 				cur_list.append((create_level(var_to_add, None, values, None)))
-		# wait static is easy as everything in here (including all the dynamic variables since im going to keep it simple for now) takes the dummy as next
+
 		underflow =  [parent_people[prediction] - sum([new_entry["num_people"][prediction] for new_entry in cur_list])
 																						for prediction in range(len(parent_people))]
 		overflow = [sum([new_entry["num_people"][prediction] for new_entry in cur_list]) - parent_people[prediction] 
@@ -268,13 +256,12 @@ def create_hierarchy(var_dict, model):
 
 	final_list = []
 	initial_var_items = initialize_var_items(model)
-	nh_county_pops = [60088, 47818, 77117, 33055, 89118, 400721, 146445, 295223, 123143, 43742]
 
-	new_traverse(final_list, dict(), initial_var_items, nh_county_pops)
+	new_traverse(final_list, dict(), initial_var_items, initial_people)
 
 	return final_list
 
-def generate_output(state, state_fips, year, model, features=None):
+def generate_output(model, initial_people, features=None):
 	""" Performs duplication of pums data and assigns counties
 
 	Args:
@@ -333,10 +320,10 @@ def generate_output(state, state_fips, year, model, features=None):
 				if row_prediction: # if this one works then does current level first. otherwise searches all parents branches. 
 					return row_prediction	# we can skip because it will try it again and fail in loop.
 
-				# var_data["dumped"] += int(row[col_names["PWGTP"]])
 				row_prediction = next(var_data["dump_iter"])
-				var_data["dumped"] += [{"num_rows": int(row[col_names["PWGTP"]]), "race": row[col_names["RAC1P"]], 
-										"puma00": row[col_names["PUMA00"]], "county": row_prediction}]
+				if config.debug_dumped_predictions:
+					var_data["dumped"] += [{"num_rows": int(row[col_names["PWGTP"]]), "race": row[col_names["RAC1P"]], 
+											"puma00": row[col_names["PUMA00"]], "county": row_prediction}]
 				return row_prediction
 
 			row_val = mk_int(row[col_names[var_data["var"]]])
@@ -360,48 +347,21 @@ def generate_output(state, state_fips, year, model, features=None):
 
 			return predict_row(row, var_data["next"])
 
-			# if var_data["num_joined"] is None:  # if no num_joined then it is a static variable so we have already checked and use head's info
-			# 	return predict_row(row, var_data["next"])
-
-			# if var_data["num_joined"]:  # this will be run extra times as we have num_joined decreasing down chain but still call it in successive nodes
-			# 	consistent = True
-			# 	cur_var_data = var_data
-
-			# 	for i in range(var_data["num_joined"]):
-			# 		cur_var_data = cur_var_data["next"][0]  # since its conjoined variable, has only one element in subhierarchy
-
-			# 		row_val = mk_int(row[col_names[cur_var_data["var"]]])
-			# 		lower_bound, upper_bound = cur_var_data["values"]
-
-			# 		if not (row_val is not None and row_val >= lower_bound and row_val <= upper_bound):
-			# 			consistent = False
-			# 			break
-
-			# 	if not consistent:  # this activates only if isn't compatable on some static variable in chain
-			# 		continue  # we don't add this variable and jump to next chain
-
 	def get_total_left_to_assign(sub_hierarchy):
 		if not sub_hierarchy[0]["next"]:
-			dumped = sub_hierarchy[-1]["dumped"]
-			return sum([dump["num_rows"] for dump in dumped])
-			# return sum([sum(var_data["num_people"]) for var_data in sub_hierarchy])
+			return sum([dump["num_rows"] for dump in sub_hierarchy[-1]["dumped"]])
 
 		return sum([get_total_left_to_assign(var_data["next"]) for var_data in sub_hierarchy])
 
 	seed(12345)
 
-	acs_file = "..\scripts\county_assignment\data\ss13pnh.csv"
-	output_file = "..\scripts\county_assignment\data\pnh13.csv"
-
-	hierarchy = create_hierarchy(create_var_dict(), model)
+	expressions = parse_model_statements()
+	hierarchy = create_hierarchy(expressions, model, initial_people)
 	prediction_names = list(create_prediction_map().keys())
 	dump_predictions = itertools.cycle(prediction_names)
 
-	# pprint(hierarchy)
-	# print(get_total_left_to_assign(hierarchy))
-
-	with open(acs_file) as acs_csv, \
-		 open(output_file, "w", newline = "") as w_csv:
+	with open(config.base_file) as acs_csv, \
+		 open(config.output_file, "w", newline = "") as w_csv:
 		r, output = list(csv.reader(acs_csv)), csv.writer(w_csv)
 
 		if not features:
@@ -412,28 +372,18 @@ def generate_output(state, state_fips, year, model, features=None):
 
 		for row in r[1:]:  # thid can be done better with a splice
 			row_prediction = predict_row(row, hierarchy)
-			# output.writerow([row_prediction] + [row[col_names[feat]] for feat in features])
-			# output.writerow([row_id, row_prediction])
+			if not config.output_rows:
+				continue
 
-			for i in range(int(row[col_names["PWGTP"]])):
+			if not config.duplicate_rows:
 				output.writerow([row_prediction] + [row[col_names[feat]] for feat in features])
+				# output.writerow([row_id, row_prediction])
+			else:
+				for i in range(int(row[col_names["PWGTP"]])):
+					output.writerow([row_prediction] + [row[col_names[feat]] for feat in features])
 
-	# pprint(hierarchy)
-	# print(get_total_left_to_assign(hierarchy))
-	
+	if config.debug_hierarchy:
+		pprint(hierarchy)
+		print(get_total_left_to_assign(hierarchy))
+
 	return
-
-
-# For MAJID
-# we merge by parent_row_id == person.parent_row_id (from parent_row_id, county model file versus base(or merged) pums file)
-
-# file1: apply_model.py: prints out county + parent_row_id (which is just row number)
-# file2: create_base.py: prints out person_id, person_code, state_code, state_abbr, parent_row
-
-state, state_fips, year = "NH", 33, 13
-features = ["PWGTP", "AGEP", "RAC1P", "SCH", "FER", "MAR", "SEX", "SCHL"]
-
-# model = [["AGEP"], ["RAC1P"], ["PUMA00", "PUMA10"]]
-model = [["RAC1P"], ["PUMA00", "PUMA10"]]
-
-generate_output(state, state_fips, year, model, features=features)
