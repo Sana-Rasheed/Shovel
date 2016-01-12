@@ -256,7 +256,7 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 
 	return final_list
 
-def generate_output(model, initial_people, features=None):
+def generate_assignments(model, initial_people, features=None):
 	""" Performs duplication of pums data and assigns counties
 
 	Args:
