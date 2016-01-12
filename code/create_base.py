@@ -18,13 +18,13 @@ def parse_model_statements():
 
 	Returns:
 		A trimmed example of the structure created with categories:
-			"SCHL=1-11 & AGEP=25-99", "SCHL=12-15 & AGEP=25-99", "AGEP=0-4", "AGEP=5-9", "SEX=1", "SEX=2"
-			at column_index: [3, 4, 12, 13, 25, 26]. We trim off county and state in subsequent work so we subtract by 2
+			"SCHL=1-11 & AGEP=25-99", "SCHL=12-15 & AGEP=25-99", 
+			"AGEP=0-4", "AGEP=5-9", "SEX=1", "SEX=2"
 
 		{"AND": [{"SCHL": {1: [1,..,11],
 			               2: [12,..,15],..},
-
-			 	  "static": {"AGEP": [25,..,99],..},..]
+			 	  "static": {"AGEP": [25,..,99],..},
+			 	  ..]
 		"AGEP": {10: [0,..,4],
 		 		 11: [5,..,9],..}
 		"SEX": {23: [1],
@@ -99,16 +99,11 @@ def parse_model_statements():
 	return var_dict
 
 def create_prediction_map():
-	""" Reads the cleaned_sum_files.csv and returns nicer data structure for value accessing by variable index
-
-	Reads until finds rows for this state. Each row has a county and then their variables.
-	We store and return a dictionary of the county with its variables.
-
-	Args:
-		state: state fips code
+	""" Reads model files people in
 
 	Returns:
-		Dictionary with county names as keys with values a list containing its proportions in order
+		Ordered dictionary with outcomes as keys
+			values are lists containing the outcomes people in order
 
 		{"Belknap County": ['550', '6124', ..],
 	 	 "Coos County":    ['431', '5312', ..],..}
@@ -124,17 +119,14 @@ def create_prediction_map():
 
 	return prediction_map	
 
-def create_hierarchy(var_dict, model, initial_people):
-	""" Transforms the data structure from summary files into a variable proportion hierarchy for application to each row
+def create_hierarchy(parsed_expressions, model, initial_people):
+	""" Transforms the parsed model file into a hierarchy for by row application to base_file.
 
-	Starts with an empty list and recursively constructs the hierarchy
-	Goes through each not conjoined variable and adds to current list
-	Then inside each new dict entry created, creates an empty list and repeats for next variable
-	Then handles non-conjoined variables where compatible with the levels preceding it using multi_check
-	Once in final format, can be applied to row easily by diving down hierarchy where row_from_pums_file[var] is in cur_hierarchy[values]
+	Algorithms and ideas associated with this hierarchy are in the technical documentation.
+	Additional complexity is due to handling of conjoined and overlapping statements.
 
 	Args:
-		ar_dict: Summary file variables after being prepped by create_ar_dict()
+		parsed_expressions: Summary file variables after being prepped by create_ar_dict()
 
 	Returns:
 		Returns a list of dictionaries. 
@@ -180,9 +172,9 @@ def create_hierarchy(var_dict, model, initial_people):
 		new_path.update({new_entry["var"]: new_entry["values"]})
 		return new_path
 
-	def check_consistent(var_items, path):
-		for var_item in var_items:
-			var, values = var_item
+	def check_consistent(expression_items, path):
+		for expression in expression_items:
+			var, values = expression
 
 			if not var in path.keys():
 				continue
@@ -209,21 +201,21 @@ def create_hierarchy(var_dict, model, initial_people):
 	def overflow_strategy(max_num_people, all_num_people):
 		return [int((num_people / sum(all_num_people)) * max_num_people) for num_people in all_num_people] 
 
-	def initialize_var_items(model):
-		return [[(var, list(var_dict[var].items())) for var in group] for group in model]
+	def initialize_expression_items(model):
+		return [[(var, list(parsed_expressions[var].items())) for var in group] for group in model]
 
-	def new_traverse(cur_list, path, var_items, parent_people):
-		if not var_items:
+	def new_traverse(cur_list, path, expression_items, parent_people):
+		if not expression_items:
 			return
 
-		variable_pack = copy.deepcopy(var_items)
-		new_vars = variable_pack.pop()
+		expression_packs = copy.deepcopy(expression_items)
+		expression_pack = expression_packs.pop()
 
-		while variable_pack and not check_consistent(new_vars, path):
-			new_vars = variable_pack.pop()
+		while expression_packs and not check_consistent(expression_pack, path):
+			expression_pack = expression_packs.pop()
 
-		for var_item in new_vars:
-			var_to_add, values = var_item
+		for expression in expression_pack:
+			var_to_add, values = expression
 
 			num_joined = 0 # TODO SETTing num_joined to 0 always for now
 
@@ -244,23 +236,23 @@ def create_hierarchy(var_dict, model, initial_people):
 											[new_entry["num_people"][prediction] for new_entry in cur_list])
 								for prediction in range(len(parent_people))]  
 			
-		for category, new_entry in enumerate(cur_list):		# this is so awesome, uses double level enumerate perfectly
+		for category, new_entry in enumerate(cur_list):	 # clever double level enumerate
 			for prediction, coefficients in enumerate(subtract_people):  # [[cat1, cat2,..], prediction2, ...]
 				new_entry["num_people"][prediction] -= coefficients[category]
 
 		cur_list.append((create_level("no_matches", None, None, num_joined, no_matches=underflow)))	
 
-		for new_entry in cur_list:	# now it wont have the var_item for this pack
-			new_path = update_path(path, new_entry)		#TODO: make sure this path is ok with new method
-			new_traverse(new_entry["next"], new_path, variable_pack, new_entry["num_people"])
+		for new_entry in cur_list:
+			new_path = update_path(path, new_entry)	
+			new_traverse(new_entry["next"], new_path, expression_packs, new_entry["num_people"])
 
 	prediction_map = create_prediction_map().items()
 	prediction_names = list(create_prediction_map().keys())
 
 	final_list = []
-	initial_var_items = initialize_var_items(model)
+	initial_expression_items = initialize_expression_items(model)
 
-	new_traverse(final_list, dict(), initial_var_items, initial_people)
+	new_traverse(final_list, dict(), initial_expression_items, initial_people)
 
 	return final_list
 
