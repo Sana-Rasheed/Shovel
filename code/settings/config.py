@@ -13,10 +13,10 @@ output_file = r".\data\results\pnh13.csv"
 ###################
 # Debugging config
 ###################
-'''Output to stderr the hierarchy after prediction'''
+'''Output to stdout the hierarchy after prediction'''
 debug_hierarchy = False
 
-'''Output to stderr how the models were parsed into groups'''
+'''Output to stdout how the models were parsed into groups'''
 debug_model_parser = False
 
 '''Store extra debugging information in hierachy on predictions that dont fit assignments.
