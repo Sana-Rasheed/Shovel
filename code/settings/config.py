@@ -35,7 +35,8 @@ duplicate_rows = False
 ###################
 # Model config
 ###################
-'''Which variables to include in product'''
+'''Which variables to include in product
+    Set features = None to include all variables in final product'''
 features = ["PWGTP", "AGEP", "RAC1P", "SCH", "FER", "MAR", "SEX", "SCHL"]
 
 '''Which variables, in reverse order, in their sub-groups to build model off of'''

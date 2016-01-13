@@ -11,10 +11,9 @@ from pprint import pprint
 from .settings import config as config
 
 def parse_model_statements():
-	""" Reads the cleaned_sum_files.csv and returns nicer data structure for hierarchal variable breakdown
+	""" Parse model statements for variable hierarchy
 
-	Operations are performed on the column names, or categories, that we defined earlier in clean_summaries()
-	Categories with dashes are taken to be range, variables with & are treated together
+	Grammar and tokens are defined in the technical documentation
 
 	Returns:
 		A trimmed example of the structure created with categories:
@@ -32,6 +31,7 @@ def parse_model_statements():
 	"""
 
 	def transform_col(stmnt, index):
+		""" Split statements into index and values """
 		var, values = stmnt.split("=")
 
 		if "-" in values:
@@ -42,6 +42,7 @@ def parse_model_statements():
 		return {var: {index: (int(start), int(end))}}
 
 	def update_var_dict(cur_var_dict, new_var_dict):
+		""" Update either standard or conjoined statements with new values """
 		var = list(new_var_dict.keys())[0]
 
 		if var in cur_var_dict:
@@ -50,6 +51,7 @@ def parse_model_statements():
 			cur_var_dict.update(new_var_dict)
 
 	def trim_multi_static(multi_dict):
+		""" Identify which variables in expression are static and separate """
 		trim_vars = []
 		for var, values_dict in multi_dict.items():
 			prev_values = None
@@ -66,8 +68,8 @@ def parse_model_statements():
 
 	var_dict = {"AND": []}
 
-	with open(config.model_file) as sumcsv:
-		r = list(csv.reader(sumcsv))		
+	with open(config.model_file) as model_csv:
+		r = list(csv.reader(model_csv))		
 		columns = {r[0][i] : i - 1 for i in range(1, len(r[0]))}
 
 		visited_stmnts = set()
@@ -77,7 +79,7 @@ def parse_model_statements():
 				all_stmnts = [transform_col(sub_stmnt, columns[stmnt])
 									 	for sub_stmnt in stmnt.split(" & ")]
 
-				new_var_pair = tuple([list(new_var_dict.keys())[0]  # tuple for hashing to visited_stmnts
+				new_var_pair = tuple([list(new_var_dict.keys())[0] 
 									for new_var_dict in all_stmnts])
 
 				if new_var_pair not in visited_stmnts:
@@ -99,72 +101,64 @@ def parse_model_statements():
 	return var_dict
 
 def create_prediction_map():
-	""" Reads model files people in
-
-	Returns:
-		Ordered dictionary with outcomes as keys
-			values are lists containing the outcomes people in order
-
-		{"Belknap County": ['550', '6124', ..],
-	 	 "Coos County":    ['431', '5312', ..],..}
-	"""
+	""" Helper used in both create_hierarchy and generate_assignments
+		Returns {"Belknap County": ['550', '6124', ..], "Coos County": ['431', '5312', ..],..} """
 	prediction_map = collections.OrderedDict()
 	
-	with open(config.model_file) as sum_csv:
- 		sum_file = csv.reader(sum_csv)
+	with open(config.model_file) as model_csv:
+ 		r = list(csv.reader(model_csv))
 
- 		for row in list(sum_file)[1:]:
+ 		for row in r[1:]:
  			prediction, persons = row[0], row[1:]
  			prediction_map[prediction] = [float(people) for people in persons]
 
 	return prediction_map	
 
-def create_hierarchy(parsed_expressions, model, initial_people):
+def create_hierarchy(parsed_expressions):
 	""" Transforms the parsed model file into a hierarchy for by row application to base_file.
 
 	Algorithms and ideas associated with this hierarchy are in the technical documentation.
 	Additional complexity is due to handling of conjoined and overlapping statements.
 
 	Args:
-		parsed_expressions: Summary file variables after being prepped by create_ar_dict()
+		parsed_expressions: Columns/expressions of model file after being parsed
+							by parse_model_statements()
 
 	Returns:
-		Returns a list of dictionaries. 
-		Each dictionary has keys - 'var': pums var name, 'index': index in prop_map/puma_dict[puma][county][var_props]
-								'values': if row's value matches one of these values, 'next': another list of dictionaries for rest of vars
-
-		[{'var': 'AGEP'
-		 'index': 12,
-		 'values': [25, 26, 27, 28, 29, 30, 31, 32, 33, 34],
-  		 'next': [{'index': 20,
-		  		   'values': [1],
-		           'var': 'SEX',
-		           'next': [{'index': 0,
-		                     'next': [],
-		                     'values': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-		                     'var': 'SCHL'},
+		Returns a list of new entries
+		Each new entry is a dict mapping all necessary attributes for row-time calculations
 	"""
 
+	def overflow_strategy(max_num_people, all_num_people):
+		""" Algorithm documented in technical documentation """
+		return [int((num_people / sum(all_num_people)) * max_num_people) for num_people in all_num_people] 
+
+	def initialize_expression_items():
+		""" Prepare the parsed_expressions for popping in hierarchy creation """
+		return [[(var, list(parsed_expressions[var].items())) for var in group] for group in config.model]
+
 	def create_level(var, index, values, num_joined, replace_num_people_with=False):
+		""" Creates an entry to add into current level of hierarchy """
 		if replace_num_people_with:
 			num_people = replace_num_people_with 
 		else:
 			if index is not None:
 				num_people = [predictions[index] for var, predictions in prediction_map]
 			else:
-				num_people = [0 for var, predictions in prediction_map] # this is for num_joined dummy elements
+				num_people = [0 for var, predictions in prediction_map]  # For static dummy entries
 
 		nonempty_predictions = [prediction_names[i] for i, prediction in enumerate(num_people) if prediction > 0]
 
-		if nonempty_predictions:
+		if nonempty_predictions: # Once all slots are full, cycle dumping to initially nonempty slots if any
 			dump_predictions_iter = itertools.cycle(nonempty_predictions)
 		else:
 			dump_predictions_iter = itertools.cycle(prediction_names)
 
-		return {"var": var, "index": index, "values": values, "next": list(), "num_joined": num_joined, 
+		return {"var": var, "values": values, "next": list(), "num_joined": num_joined, 
 				"num_people": num_people, "dumped": [], "dump_iter": dump_predictions_iter}
 
 	def update_path(path, new_entry):
+		""" Updates path before diving to new, empty child of new_entry """
 		new_path = path.copy()
 		if new_entry["var"] == "no_matches":
 			return new_path
@@ -173,6 +167,7 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 		return new_path
 
 	def check_consistent(expression_items, path):
+		""" Trims expression_items for compatability with current path """
 		for expression in expression_items:
 			var, values = expression
 
@@ -203,14 +198,9 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 
 		return True
 
-	def overflow_strategy(max_num_people, all_num_people):
-		return [int((num_people / sum(all_num_people)) * max_num_people) for num_people in all_num_people] 
-
-	def initialize_expression_items(model):
-		return [[(var, list(parsed_expressions[var].items())) for var in group] for group in model]
-
 	def new_traverse(cur_list, path, expression_items, parent_people):
-		# Conjoined variables are not considered in current version
+		""" See technical documentation for discussion behind creating hierarchy
+			Conjoined variables not going back into effect until non-conjoined work well enough """
 		if not expression_items:
 			return
 
@@ -230,23 +220,24 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 			else:
 				cur_list.append((create_level(var_to_add, None, values, None)))
 
-		underflow =  [parent_people[prediction] - sum([new_entry["num_people"][prediction] for new_entry in cur_list])
-																						for prediction in range(len(parent_people))]
-		overflow = [sum([new_entry["num_people"][prediction] for new_entry in cur_list]) - parent_people[prediction] 
-																						for prediction in range(len(parent_people))]
+		underflow = [max_people - sum([new_entry["num_people"][prediction] for new_entry in cur_list])
+													for prediction, max_people in enumerate(parent_people)]
+		overflow = [sum([new_entry["num_people"][prediction] for new_entry in cur_list]) - max_people
+													for prediction, max_people in enumerate(parent_people)]		
 
 		underflow, overflow = [[people if people > 0 else 0 for people in flow] 
 															for flow in (underflow, overflow)]
 
 		subtract_people = [overflow_strategy(overflow[prediction], 
-											[new_entry["num_people"][prediction] for new_entry in cur_list])
-								for prediction in range(len(parent_people))]  
+											 [new_entry["num_people"][prediction] for new_entry in cur_list])
+										for prediction in range(len(parent_people))]  
 			
 		for category, new_entry in enumerate(cur_list):	 # clever double level enumerate
 			for prediction, coefficients in enumerate(subtract_people):  # [[cat1, cat2,..], prediction2, ...]
 				new_entry["num_people"][prediction] -= coefficients[category]
 
-		cur_list.append((create_level("no_matches", None, None, num_joined, replace_num_people_with=underflow)))	
+		cur_list.append((create_level("no_matches", None, None, num_joined, 
+										replace_num_people_with=underflow)))
 
 		for new_entry in cur_list:
 			new_path = update_path(path, new_entry)	
@@ -256,31 +247,28 @@ def create_hierarchy(parsed_expressions, model, initial_people):
 	prediction_names = list(create_prediction_map().keys())
 
 	final_list = []
-	initial_expression_items = initialize_expression_items(model)
+	initial_expression_items = initialize_expression_items()
 
-	new_traverse(final_list, dict(), initial_expression_items, initial_people)
+	new_traverse(final_list, dict(), initial_expression_items, config.initial_people)
 
 	return final_list
 
-def generate_assignments(model, initial_people, features=None):
-	""" Performs duplication of pums data and assigns counties
-
-	Args:
-		state: state abbrevation
-		state_fips: state fips code
-		year: last two digits of year
-	"""
+def generate_assignments():
+	""" Driver function that generates new assignments """
 
 	def mk_int(s):
-	    s = s.strip()
-	    return int(s) if s else None  #TODO: Accepting NA/0 for value.
+		""" Called on base_file values as can be NA """
+		s = s.strip()
+		return int(s) if s else None  #TODO: Accepting NA/0 for value.
 
 	def is_match(middle, lower_bound, upper_bound):
+		""" Finding the row attributes match in hierarchy """
 		if middle is not None and middle >= lower_bound and middle <= upper_bound:
 			return True
 		return False
 
 	def trim_hierarchy(row, var_data):
+		""" Returns prediction for row, subtracting this outcome's free people for next row """
 		num_rows = mk_int(row[col_names["PWGTP"]])
 
 		predicted_people = list(enumerate(var_data["num_people"]))
@@ -295,6 +283,7 @@ def generate_assignments(model, initial_people, features=None):
 		return None
 
 	def get_different_paths(cur_level, var, values):
+		""" Find more free people in parents other children entries if no more slots in match """
 		if not cur_level[0]["next"]:
 			return list()
 
@@ -305,17 +294,7 @@ def generate_assignments(model, initial_people, features=None):
 		return get_different_paths(cur_level[0]["next"], var, values)
 
 	def predict_row(row, sub_hierarchy):
-		""" Recurses through hierarchy based on matching row attribute values
-
-		Args:
-			row: row in pums file
-			sub_hierarchy: current variable hierarchy
-			indices: set of indices where row's attr matches sub_hierarchy levels
-
-		Returns:
-			indices: indices of matching proportions
-		"""
-
+		""" Predicts outcome. Recurses through hierarchy based on matching row attribute values. """
 		for var_data in sub_hierarchy:  
 			if not var_data["values"] and not var_data["next"]: 
 				row_prediction = trim_hierarchy(row, var_data)
@@ -350,6 +329,7 @@ def generate_assignments(model, initial_people, features=None):
 			return predict_row(row, var_data["next"])
 
 	def get_total_left_to_assign(sub_hierarchy):
+		""" Debugging function to see total people that didnt find a slot and were dumped """
 		if not sub_hierarchy[0]["next"]:
 			return sum([dump["num_rows"] for dump in sub_hierarchy[-1]["dumped"]])
 
@@ -358,23 +338,26 @@ def generate_assignments(model, initial_people, features=None):
 	seed(12345)
 
 	expressions = parse_model_statements()
-	hierarchy = create_hierarchy(expressions, model, initial_people)
-	prediction_names = list(create_prediction_map().keys()) # used inside trim_hierarchy, inside predict_rows
+	hierarchy = create_hierarchy(expressions)
 
-	with open(config.base_file) as acs_csv, \
-		 open(config.output_file, "w", newline = "") as w_csv:
-		r, output = list(csv.reader(acs_csv)), csv.writer(w_csv)
+	with open(config.base_file) as base_csv, \
+		 open(config.output_file, "w", newline = "") as out_csv:
+		r, output = list(csv.reader(base_csv)), csv.writer(out_csv)
 
-		if not features:
+		if not config.features:
 			features = r[0][:-80]
+		else:
+			features = config.features
 
 		col_names = {r[0][i] : i for i in range(len(r[0][:-80]))}
 		output.writerow(["COUNTY_NAME"] + features)
 
+		prediction_names = list(create_prediction_map().keys()) 
+
 		for row in r[1:]: 
 			row_prediction = predict_row(row, hierarchy)
 			if not config.output_rows:
-				continue
+				continue  
 
 			if not config.duplicate_rows:
 				output.writerow([row_prediction] + [row[col_names[feat]] for feat in features])
